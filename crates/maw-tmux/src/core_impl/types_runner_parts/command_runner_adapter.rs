@@ -98,9 +98,41 @@ fn tmux_socket_is_proven_cold(socket: &str) -> bool {
     })
 }
 
-#[cfg(not(target_os = "linux"))]
+/// macOS has no `/proc/net/unix`. `lsof -U` is the portable analog: it reads the kernel's
+/// live Unix-domain socket table and lists every bound path, so a socket file that exists
+/// on disk but is absent from that table has no live listener — the same genuinely-unbound
+/// vs. unlinked-but-live distinction #940 proves on Linux (#941). If `lsof` cannot be run
+/// at all, the missing proof fails closed: the caller stays fatal, same as a read error on
+/// `/proc/net/unix` above.
+#[cfg(target_os = "macos")]
+fn tmux_socket_is_proven_cold(socket: &str) -> bool {
+    use std::os::unix::fs::FileTypeExt as _;
+    let can_bootstrap = match std::fs::symlink_metadata(socket) {
+        Ok(metadata) => metadata.file_type().is_socket(),
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    };
+    can_bootstrap
+        && std::process::Command::new("lsof")
+            .arg("-U")
+            .output()
+            .is_ok_and(|output| {
+                !lsof_table_lists_bound_socket(&String::from_utf8_lossy(&output.stdout), socket)
+            })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn tmux_socket_is_proven_cold(_socket: &str) -> bool {
     false
+}
+
+/// Whether `lsof -U` output lists `socket` as a currently bound Unix-domain path. Kept free
+/// of `cfg(target_os = "macos")` so the parsing logic — the part most likely to regress — is
+/// unit-testable on every host, including a Linux CI runner, without a real `lsof` binary.
+#[cfg(any(target_os = "macos", test))]
+fn lsof_table_lists_bound_socket(lsof_stdout: &str, socket: &str) -> bool {
+    lsof_stdout
+        .lines()
+        .any(|line| line.strip_suffix(socket).is_some_and(|prefix| prefix.ends_with(' ')))
 }
 
 impl CommandTmuxRunner {
