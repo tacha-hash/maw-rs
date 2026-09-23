@@ -1727,6 +1727,20 @@ fn servecore_loopback_origin(origin: &str) -> bool {
         .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1" | "[::1]"))
 }
 
+/// Same loopback-host test as `servecore_loopback_origin`, applied to a
+/// request's `Origin` header instead of a bare string — the boundary the
+/// browser ws gate exempts from the ticket flow (#953), matching the
+/// existing `auth.loopback_exempt` exemption for loopback peers. A missing,
+/// duplicated, or unparseable Origin answers `false`; the caller already
+/// requires an Origin header to reach this check.
+pub(crate) fn servecore_request_loopback_origin(headers: &HeaderMap) -> bool {
+    let mut origins = headers.get_all("origin").iter();
+    let Some(origin) = origins.next() else {
+        return false;
+    };
+    origins.next().is_none() && origin.to_str().is_ok_and(servecore_loopback_origin)
+}
+
 fn servecore_add_actual_cors_headers(headers: &mut HeaderMap, origin: Option<&HeaderValue>) {
     let Some(origin) = origin else {
         return;

@@ -637,6 +637,17 @@ async fn serve_api_token_gate(
         return serve_token_unauthorized();
     }
     if req.headers().contains_key("origin") && serve_path_is_websocket(path) {
+        // A page served from a loopback origin runs on this host already —
+        // same trust boundary `auth.loopback_exempt` grants loopback peers
+        // (below). Anyone able to serve that page can already read
+        // `peer-key` off disk, so the one-use ticket buys no protection
+        // here while blocking local browser-client development (#953).
+        // Every non-loopback origin, including the hardcoded
+        // `https://god.buildwithoracle.com`, is unaffected and still falls
+        // through to the full ticket flow.
+        if auth.loopback_exempt && crate::serve_core::servecore_request_loopback_origin(req.headers()) {
+            return next.run(req).await;
+        }
         if auth.forced_open || auth.token.is_none() {
             return serve_token_unauthorized();
         }

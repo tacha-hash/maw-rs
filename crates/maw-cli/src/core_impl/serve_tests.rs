@@ -2640,9 +2640,13 @@ mod serve_tests {
         }
         let bound = store.issue(GOD, maw_auth::WsTicketPath::Ws, &mut rng, Instant::now).unwrap();
         let carrier = format!("{SERVE_WS_PROTOCOL}, {}", bound.expose_secret());
-        for (origin, path) in [("http://localhost", "/ws"), (GOD, "/ws/pty")] {
-            assert_eq!(browser_ws_status(browser_ws_request(&format!("ws://{addr}{path}"), Some(origin), &carrier)).await, StatusCode::UNAUTHORIZED);
-        }
+        // Path mismatch is still rejected regardless of origin.
+        assert_eq!(browser_ws_status(browser_ws_request(&format!("ws://{addr}/ws/pty"), Some(GOD), &carrier)).await, StatusCode::UNAUTHORIZED);
+        // #953: a loopback-origin browser skips the ticket flow entirely (same
+        // trust boundary `auth.loopback_exempt` already grants loopback peers),
+        // so a GOD-bound ticket presented from `localhost` is irrelevant here —
+        // the request is let through on origin alone, not on the ticket.
+        assert_eq!(browser_ws_status(browser_ws_request(&format!("ws://{addr}/ws"), Some("http://localhost"), &carrier)).await, StatusCode::SWITCHING_PROTOCOLS);
         assert_eq!(browser_ws_status(browser_ws_request(&format!("ws://{addr}/ws"), Some(GOD), &carrier)).await, StatusCode::SWITCHING_PROTOCOLS);
         let once = store.issue(GOD, maw_auth::WsTicketPath::Ws, &mut rng, Instant::now).unwrap();
         let carrier = format!("{SERVE_WS_PROTOCOL}, {}", once.expose_secret());
@@ -2738,6 +2742,62 @@ mod serve_tests {
             .await
             .expect("ws token");
         assert_ne!(allowed.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // #953: loopback-origin browser WS skips the ticket flow only when the peer
+    // trust boundary (`loopback_exempt`) is actually granted; non-loopback
+    // origins and a loopback origin under a token-only (non-exempt) config are
+    // both untouched — they still hit the full ticket/token gate.
+    #[tokio::test]
+    async fn serve_ws_upgrade_loopback_origin_skips_ticket_when_exempt() {
+        let exempt = serve_test_app_with_api_auth(ServeApiTokenAuth {
+            token: Some("secret-token".into()),
+            loopback_exempt: true,
+            forced_open: false,
+        });
+        for origin in ["http://localhost", "http://127.0.0.1", "http://[::1]"] {
+            let allowed = exempt
+                .clone()
+                .oneshot(
+                    serve_ws_upgrade_request("/ws?target=nova:1.0")
+                        .header("origin", origin)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .expect("loopback-origin ws");
+            assert_ne!(allowed.status(), StatusCode::UNAUTHORIZED, "{origin} should skip the ticket gate");
+        }
+
+        // A non-loopback origin still needs a ticket, exemption or not.
+        let denied = exempt
+            .clone()
+            .oneshot(
+                serve_ws_upgrade_request("/ws?target=nova:1.0")
+                    .header("origin", "https://god.buildwithoracle.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("non-loopback origin ws");
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+        // Without `loopback_exempt` granted, a loopback origin gets no free pass.
+        let not_exempt = serve_test_app_with_api_auth(ServeApiTokenAuth {
+            token: Some("secret-token".into()),
+            loopback_exempt: false,
+            forced_open: false,
+        });
+        let denied = not_exempt
+            .oneshot(
+                serve_ws_upgrade_request("/ws?target=nova:1.0")
+                    .header("origin", "http://localhost")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("loopback origin, not exempt");
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
     }
 
     // Open mode leaves the token unset, which is exactly when the old gate fell
