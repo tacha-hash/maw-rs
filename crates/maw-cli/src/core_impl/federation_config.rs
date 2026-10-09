@@ -220,12 +220,32 @@ pub(crate) fn federation_probe_auth(peer_url: &str, timeout_ms: u64) -> PeerProb
 }
 
 fn generate_peer_key() -> Result<String, String> {
-    let mut file = std::fs::File::open("/dev/urandom")
-        .map_err(|error| format!("failed to open random peer key source: {error}"))?;
-    let mut bytes = [0_u8; 32];
-    std::io::Read::read_exact(&mut file, &mut bytes)
-        .map_err(|error| format!("failed to read random peer key bytes: {error}"))?;
-    Ok(hex_bytes(&bytes))
+    #[cfg(windows)]
+    {
+        let mut bytes = [0_u8; 32];
+        rand::RngCore::try_fill_bytes(&mut rand::rngs::OsRng, &mut bytes)
+            .map_err(|error| format!("failed to read random peer key bytes: {error}"))?;
+        Ok(hex_bytes(&bytes))
+    }
+    #[cfg(not(windows))]
+    {
+        let mut file = std::fs::File::open("/dev/urandom")
+            .map_err(|error| format!("failed to open random peer key source: {error}"))?;
+        let mut bytes = [0_u8; 32];
+        std::io::Read::read_exact(&mut file, &mut bytes)
+            .map_err(|error| format!("failed to read random peer key bytes: {error}"))?;
+        Ok(hex_bytes(&bytes))
+    }
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn windows_peer_key_uses_os_entropy() {
+    let first = generate_peer_key().expect("Windows OS entropy source");
+    let second = generate_peer_key().expect("Windows OS entropy source");
+    assert_eq!(first.len(), 64);
+    assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert_ne!(first, second);
 }
 
 fn write_peer_key_file(path: &std::path::Path, key: &str) -> Result<(), String> {
