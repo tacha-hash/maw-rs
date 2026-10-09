@@ -21,8 +21,8 @@ $launcher = Join-Path $MawHome 'start-native-peer.ps1'
 New-Item -ItemType Directory -Path $MawHome -Force | Out-Null
 $start = Join-Path $PSScriptRoot 'start-serve.ps1'
 $lines = @(
-    '$env:MAW_EXE = ' + "'" + $MawExe.Replace("'", "''") + "'",
-    '& ' + "'" + $start.Replace("'", "''") + "' -MawHome '" + $MawHome.Replace("'", "''") + "' -PsmuxDirectory '" + $PsmuxDirectory.Replace("'", "''") + "' -Port " + $Port
+    ('$env:MAW_EXE = ' + "'" + $MawExe.Replace("'", "''") + "'")
+    ('& ' + "'" + $start.Replace("'", "''") + "' -MawHome '" + $MawHome.Replace("'", "''") + "' -PsmuxDirectory '" + $PsmuxDirectory.Replace("'", "''") + "' -Port " + $Port)
 )
 [IO.File]::WriteAllLines($launcher, $lines, [Text.UTF8Encoding]::new($false))
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoLogo -NoProfile -ExecutionPolicy Bypass -File "' + $launcher + '"')
