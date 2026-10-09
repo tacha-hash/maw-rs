@@ -450,6 +450,7 @@ mod serveidentity_tests {
     // must stay `Failed`, not get folded into the pre-pairing `NotPaired` case — otherwise a
     // genuine server fault would be misreported as "just not paired yet".
     #[test]
+    #[cfg(unix)]
     fn serveidentity_permission_denied_on_existing_peer_key_is_not_mistaken_for_not_paired() {
         use std::os::unix::fs::PermissionsExt;
 

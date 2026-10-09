@@ -590,7 +590,8 @@ fn serveengine_pty_command(target: &str) -> CommandBuilder {
     command
 }
 
-#[cfg(test)]
+// These fixtures execute POSIX shell scripts and set Unix executable modes.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::{
