@@ -34,3 +34,9 @@ examples/**/dist/
 # nova builder worktrees
 agents/
 .envrc
+
+# Windows local binaries, generated launchers and private federation state.
+runtime/
+maw-data/
+scripts/windows/local-toolchain/
+scripts/windows/*local*.ps1
